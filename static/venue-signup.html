@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Khelo | Register a venue</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="simple-page venue-page">
+      <div class="form-wrap">
+        <p class="khelo-mobile">KHELO</p>
+        <p class="form-kicker">COURT MANAGER</p>
+        <h2>Register your venue</h2>
+        <p class="form-intro">Add the details players need to find and book your court.</p>
+        <form id="venue-form">
+          <label for="venue-name">Venue name</label>
+          <input id="venue-name" type="text" required placeholder="Green Park Courts" />
+          <label for="sport">Sport</label>
+          <select id="sport" required><option value="">Loading sports...</option></select>
+          <label for="address">Address</label>
+          <input id="address" type="text" required placeholder="Street, city" />
+          <label for="maps-url">Google Maps link</label>
+          <input id="maps-url" type="url" required placeholder="https://maps.google.com/..." />
+          <div class="two-fields">
+            <div><label for="opens-at">Opens</label><input id="opens-at" type="time" required /></div>
+            <div><label for="closes-at">Closes</label><input id="closes-at" type="time" required /></div>
+          </div>
+          <div class="two-fields">
+            <div><label for="duration">Slot duration (minutes)</label><input id="duration" type="number" min="15" max="240" step="15" value="60" required /></div>
+            <div><label for="price">Price per slot (INR)</label><input id="price" type="number" min="0" step="1" required placeholder="500" /></div>
+          </div>
+          <label for="photos">Court photo URLs <span class="optional">(comma separated)</span></label>
+          <input id="photos" type="text" placeholder="https://.../court.jpg, https://.../inside.jpg" />
+          <button class="primary-button" type="submit">Register venue</button>
+        </form>
+        <p id="form-message" class="form-message" role="status"></p>
+      </div>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

@@ -28,7 +28,7 @@
           <h2 id="login-heading">Ready to play?</h2>
           <p class="form-intro">Sign in to manage your bookings and find your next game.</p>
 
-          <form action="#" method="post">
+          <form id="login-form">
             <label for="email">Email address</label>
             <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
 
@@ -42,13 +42,15 @@
           </form>
 
           <div class="divider"><span>OR</span></div>
-          <button class="google-button" type="button">
+          <button class="google-button" type="button" disabled title="Google OAuth will be connected next">
             <span class="google-g" aria-hidden="true">G</span>
             Continue with Google
           </button>
-          <p class="signup-prompt">New to Khelo? <a href="#">Create an account</a></p>
+          <p class="signup-prompt">New to Khelo? <a href="/static/signup.html">Create an account</a></p>
+          <p id="form-message" class="form-message" role="status"></p>
         </div>
       </section>
     </main>
+    <script src="/static/app.js"></script>
   </body>
 </html>

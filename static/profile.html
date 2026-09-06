@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Khelo | Complete profile</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="simple-page">
+      <div class="form-wrap">
+        <p class="khelo-mobile">KHELO</p>
+        <p class="form-kicker">ONE LAST STEP</p>
+        <h2>Complete your profile</h2>
+        <p class="form-intro">Tell us who you are before you book or register a court.</p>
+        <form id="profile-form">
+          <label for="full-name">Full name</label>
+          <input id="full-name" type="text" required minlength="2" maxlength="120" placeholder="Your full name" />
+          <label for="profile-picture">Profile picture URL <span class="optional">(optional)</span></label>
+          <input id="profile-picture" type="url" placeholder="https://example.com/photo.jpg" />
+          <button class="primary-button" type="submit">Save profile</button>
+        </form>
+        <p id="form-message" class="form-message" role="status"></p>
+      </div>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
