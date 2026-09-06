@@ -1,0 +1,13 @@
+A website for people to book sports courts and grounds in their city. Users will be of two types : Court managers and players. Google maps API will be used for location. Stripe API will be used for payments for booking. OAuth for login through google.
+
+Functions:
+1. Login, Sign up (Sign up/Sign in using google, Login (email, password), Sign-up (email, password, confirm password). Upon first sign up/sign in, ask to complete profile (Full Name, profile picture)
+2. Player Profile: Past matches (each match: match date, opponent, final score), Full Name, Profile picture
+3. Browse sports courts
+4. Check court availability (Booked, free... If booked, next available slot)
+
+
+Use PostgreSQL for database. Use python fastapi for backend. Use javascript, tailwaind css, html for front-end. 
+
+Functions for court owners:
+1. Register court : (Court pictures, google maps location link, Venue name, sport name, Time duration, working hours, Cost of booking)
