@@ -5,50 +5,36 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Sign in to Khelo and book a court." />
     <title>Khelo | Sign in</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <main class="login-shell">
-      <section class="brand-panel" aria-label="Khelo">
-        <div class="brand-mark"><span></span><span></span><span></span></div>
-        <p class="eyebrow">PLAY YOUR CITY</p>
-        <h1>KHELO</h1>
-        <p class="brand-copy">Find a court. Pick a time. Get in the game.</p>
-        <div class="court-lines" aria-hidden="true"></div>
-        <p class="location-label">YOUR NEXT MATCH STARTS HERE</p>
-      </section>
+    <main class="auth-page">
+      <section class="auth-window" aria-labelledby="login-heading">
+        <a class="wordmark" href="/">KHELO</a>
+        <p class="form-kicker">COURTS AND GROUNDS, NEAR YOU</p>
+        <h1 id="login-heading">Get in the game.</h1>
+        <p class="form-intro">Book your next court or manage your venue.</p>
 
-      <section class="form-panel" aria-labelledby="login-heading">
-        <div class="form-wrap">
-          <p class="khelo-mobile">KHELO</p>
-          <p class="form-kicker">WELCOME BACK</p>
-          <h2 id="login-heading">Ready to play?</h2>
-          <p class="form-intro">Sign in to manage your bookings and find your next game.</p>
+        <fieldset class="role-picker">
+          <legend>Continue as</legend>
+          <label><input type="radio" name="role" value="player" checked /> Player</label>
+          <label><input type="radio" name="role" value="court_manager" /> Venue manager</label>
+        </fieldset>
 
-          <form id="login-form">
-            <label for="email">Email address</label>
-            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
-
-            <div class="password-label">
-              <label for="password">Password</label>
-              <a href="#">Forgot password?</a>
-            </div>
-            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required />
-
-            <button class="primary-button" type="submit">Sign in</button>
-          </form>
-
-          <div class="divider"><span>OR</span></div>
-          <button class="google-button" type="button" disabled title="Google OAuth will be connected next">
-            <span class="google-g" aria-hidden="true">G</span>
-            Continue with Google
-          </button>
-          <p class="signup-prompt">New to Khelo? <a href="/static/signup.html">Create an account</a></p>
-          <p id="form-message" class="form-message" role="status"></p>
+        <div class="auth-actions" aria-label="Account options">
+          <a class="primary-button" href="/static/signup.html" id="signup-option">Sign up</a>
+          <button class="secondary-button" type="button" id="show-login">Sign in</button>
+          <button class="google-button" type="button" id="google-signin"><span class="google-g" aria-hidden="true">G</span> Sign in with Google</button>
         </div>
+
+        <form id="login-form" class="hidden-form" novalidate>
+          <label for="email">Email address</label>
+          <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required />
+          <button class="primary-button" type="submit">Continue</button>
+        </form>
+        <p id="form-message" class="form-message" role="status"></p>
       </section>
     </main>
     <script src="/static/app.js"></script>

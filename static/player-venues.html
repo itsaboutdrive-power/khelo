@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Khelo | Available courts</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="browse-page">
+      <header class="browse-header"><a class="wordmark" href="/">KHELO</a><p>Courts free near you</p></header>
+      <section class="browse-content" aria-labelledby="browse-heading">
+        <p class="form-kicker">LIVE AVAILABILITY</p>
+        <h2 id="browse-heading">Find your court</h2>
+        <form id="venue-filters" class="filters">
+          <label for="sport-filters">Sports</label>
+          <select id="sport-filters" multiple aria-label="Select one or more sports"></select>
+          <label for="price-sort">Sort</label>
+          <select id="price-sort">
+            <option value="">Nearest available</option>
+            <option value="low_to_high">Price: low to high</option>
+            <option value="high_to_low">Price: high to low</option>
+          </select>
+        </form>
+        <p id="form-message" class="form-message" role="status"></p>
+        <section id="venue-results" class="venue-results" aria-live="polite"><p>Finding available courts near you...</p></section>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

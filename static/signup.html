@@ -7,27 +7,29 @@
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <main class="simple-page">
-      <div class="form-wrap">
-        <p class="khelo-mobile">KHELO</p>
-        <p class="form-kicker">JOIN THE GAME</p>
-        <h2>Create your account</h2>
-        <p class="form-intro">Start booking courts or register your own venue.</p>
+    <main class="auth-page">
+      <section class="auth-window">
+        <a class="wordmark" href="/">KHELO</a>
+        <p class="form-kicker">CREATE YOUR ACCOUNT</p>
+        <h1>Set up your profile.</h1>
+        <p class="form-intro">Your details appear with your bookings and venue activity.</p>
         <form id="signup-form">
+          <label for="full-name">Full name</label>
+          <input id="full-name" type="text" required minlength="2" maxlength="120" autocomplete="name" placeholder="Your full name" />
+          <label for="profile-picture">Profile photo URL <span class="optional">(optional)</span></label>
+          <input id="profile-picture" type="url" placeholder="https://example.com/photo.jpg" />
           <label for="signup-email">Email address</label>
           <input id="signup-email" type="email" required autocomplete="email" placeholder="you@example.com" />
-          <label for="signup-password">Password</label>
+          <label for="signup-password">Create password</label>
           <input id="signup-password" type="password" minlength="8" required autocomplete="new-password" placeholder="At least 8 characters" />
-          <label for="signup-role">I am signing up as</label>
-          <select id="signup-role">
-            <option value="player">Player</option>
-            <option value="court_manager">Court manager</option>
-          </select>
+          <label for="confirm-password">Confirm password</label>
+          <input id="confirm-password" type="password" minlength="8" required autocomplete="new-password" placeholder="Repeat your password" />
+          <input id="signup-role" type="hidden" value="player" />
           <button class="primary-button" type="submit">Create account</button>
         </form>
         <p id="form-message" class="form-message" role="status"></p>
         <p class="signup-prompt"><a href="/">Back to sign in</a></p>
-      </div>
+      </section>
     </main>
     <script src="/static/app.js"></script>
   </body>

@@ -5,11 +5,16 @@ import hmac
 import os
 from pathlib import Path
 import secrets
+from time import monotonic
+from typing import Literal
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import urlopen
 from uuid import UUID, uuid4
 
 import psycopg
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Query, status
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,12 +25,16 @@ load_dotenv(BASE_DIR / ".env")
 
 app = FastAPI(title="Khelo API", version="0.1.0")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+VENUE_POLL_INTERVAL_SECONDS = 10
+last_venue_poll: dict[UUID, float] = {}
 
 
 class SignupRequest(BaseModel):
     email: str
     password: str = Field(min_length=8)
     role: str = "player"
+    full_name: str = Field(min_length=2, max_length=120)
+    profile_picture_url: HttpUrl | None = None
 
     @field_validator("email")
     @classmethod
@@ -99,6 +108,51 @@ def user_response(user_id: UUID, email: str, role: str, full_name: str | None) -
     }
 
 
+def google_maps_request(endpoint: str, parameters: dict[str, str]) -> dict:
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Google Maps is not configured.")
+
+    url = f"https://maps.googleapis.com/maps/api/{endpoint}?{urlencode({**parameters, 'key': api_key})}"
+    try:
+        with urlopen(url, timeout=10) as response:
+            payload = response.read().decode("utf-8")
+    except (HTTPError, URLError, TimeoutError) as error:
+        raise HTTPException(status_code=503, detail="Location service is temporarily unavailable.") from error
+
+    import json
+
+    result = json.loads(payload)
+    if result.get("status") != "OK":
+        raise HTTPException(status_code=400, detail="Google Maps could not resolve the requested location.")
+    return result
+
+
+def resolve_origin(latitude: float | None, longitude: float | None, location: str | None) -> tuple[float, float]:
+    if latitude is not None and longitude is not None:
+        return latitude, longitude
+    if not location:
+        raise HTTPException(status_code=422, detail="Provide latitude/longitude or a location.")
+
+    result = google_maps_request("geocode/json", {"address": location})
+    coordinates = result["results"][0]["geometry"]["location"]
+    return coordinates["lat"], coordinates["lng"]
+
+
+def get_distances(origin: tuple[float, float], venues: list[tuple]) -> dict[UUID, int]:
+    destinations = "|".join(f"{venue[5]},{venue[6]}" for venue in venues)
+    result = google_maps_request(
+        "distancematrix/json",
+        {"origins": f"{origin[0]},{origin[1]}", "destinations": destinations, "mode": "driving"},
+    )
+    elements = result["rows"][0]["elements"]
+    return {
+        venue[0]: element["distance"]["value"]
+        for venue, element in zip(venues, elements)
+        if element.get("status") == "OK"
+    }
+
+
 @contextmanager
 def get_database_connection():
     database_url = os.getenv("DATABASE_URL")
@@ -119,6 +173,101 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/venues/discover")
+def discover_venues(
+    player_id: UUID,
+    latitude: float | None = Query(default=None, ge=-90, le=90),
+    longitude: float | None = Query(default=None, ge=-180, le=180),
+    location: str | None = Query(default=None, min_length=2, max_length=250),
+    sport_ids: list[int] | None = Query(default=None),
+    max_distance_km: float = Query(default=10, gt=0, le=100),
+    sort_by_price: Literal["low_to_high", "high_to_low"] | None = None,
+) -> dict:
+    """Poll currently available courts, limited to one request per player every 10 seconds."""
+    if (latitude is None) != (longitude is None):
+        raise HTTPException(status_code=422, detail="Latitude and longitude must be sent together.")
+
+    now = monotonic()
+    previous_poll = last_venue_poll.get(player_id)
+    if previous_poll is not None and now - previous_poll < VENUE_POLL_INTERVAL_SECONDS:
+        retry_after = max(1, int(VENUE_POLL_INTERVAL_SECONDS - (now - previous_poll)))
+        raise HTTPException(
+            status_code=429,
+            detail="Venue polling is limited to once every 10 seconds.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    last_venue_poll[player_id] = now
+    origin = resolve_origin(latitude, longitude, location)
+    try:
+        with get_database_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT role FROM users WHERE id = %s", (player_id,))
+                player = cursor.fetchone()
+                if not player or player[0] != "player":
+                    raise HTTPException(status_code=403, detail="Only players can discover venues.")
+
+                query = """
+                    SELECT v.id, v.name, s.name, v.address, v.google_maps_url,
+                           v.latitude, v.longitude, v.slot_duration_minutes,
+                           v.booking_price_cents, v.currency, v.opens_at, v.closes_at
+                    FROM venues AS v
+                    JOIN sports AS s ON s.id = v.sport_id
+                    WHERE v.is_active = true
+                      AND v.latitude IS NOT NULL AND v.longitude IS NOT NULL
+                      AND CURRENT_TIME >= v.opens_at AND CURRENT_TIME < v.closes_at
+                      AND (
+                          v.booking_id = -1
+                          OR NOT EXISTS (
+                              SELECT 1 FROM bookings AS b
+                              WHERE b.id = v.booking_id
+                          )
+                          OR EXISTS (
+                              SELECT 1 FROM bookings AS b
+                              WHERE b.id = v.booking_id
+                                AND (now() < b.starts_at OR now() >= b.ends_at)
+                          )
+                      )
+                """
+                parameters: list[object] = []
+                if sport_ids:
+                    query += " AND v.sport_id = ANY(%s)"
+                    parameters.append(sport_ids)
+                query += " ORDER BY v.id LIMIT 25"
+                cursor.execute(query, parameters)
+                venues = cursor.fetchall()
+    except HTTPException:
+        raise
+    except (RuntimeError, psycopg.Error) as error:
+        raise HTTPException(status_code=503, detail="Venue discovery is temporarily unavailable.") from error
+
+    distances = get_distances(origin, venues)
+    maximum_distance_meters = int(max_distance_km * 1000)
+    results = [
+        {
+            "venue_id": str(venue[0]), "name": venue[1], "sport": venue[2],
+            "address": venue[3], "google_maps_url": venue[4],
+            "distance_meters": distances[venue[0]], "slot_duration_minutes": venue[7],
+            "booking_price_cents": venue[8], "currency": venue[9],
+            "opens_at": venue[10].isoformat(), "closes_at": venue[11].isoformat(),
+        }
+        for venue in venues
+        if venue[0] in distances and distances[venue[0]] <= maximum_distance_meters
+    ]
+    if sort_by_price == "low_to_high":
+        results.sort(key=lambda venue: venue["booking_price_cents"])
+    elif sort_by_price == "high_to_low":
+        results.sort(key=lambda venue: venue["booking_price_cents"], reverse=True)
+    else:
+        results.sort(key=lambda venue: venue["distance_meters"])
+
+    return {
+        "max_distance_km": max_distance_km,
+        "next_poll_after_seconds": VENUE_POLL_INTERVAL_SECONDS,
+        "venues": results,
+    }
+
+
 @app.post("/api/auth/signup", status_code=status.HTTP_201_CREATED)
 def signup(payload: SignupRequest) -> dict:
     user_id = uuid4()
@@ -127,22 +276,33 @@ def signup(payload: SignupRequest) -> dict:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO users (id, email, password_hash, role)
-                    VALUES (%s, %s, %s, %s)
-                    RETURNING email, role
+                    INSERT INTO users (
+                        id, email, password_hash, role, full_name,
+                        profile_picture_url, profile_completed_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING email, role, full_name
                     """,
-                    (user_id, payload.email, hash_password(payload.password), payload.role),
+                    (
+                        user_id,
+                        payload.email,
+                        hash_password(payload.password),
+                        payload.role,
+                        payload.full_name.strip(),
+                        str(payload.profile_picture_url) if payload.profile_picture_url else None,
+                        datetime.now(timezone.utc),
+                    ),
                 )
                 created_user = cursor.fetchone()
                 if not created_user:
                     raise HTTPException(status_code=500, detail="Account could not be created.")
-                email, role = created_user
+                email, role, full_name = created_user
     except psycopg.errors.UniqueViolation as error:
         raise HTTPException(status_code=409, detail="An account with this email already exists.") from error
     except (RuntimeError, psycopg.Error) as error:
         raise HTTPException(status_code=503, detail="Account creation is temporarily unavailable.") from error
 
-    return user_response(user_id, email, role, None)
+    return user_response(user_id, email, role, full_name)
 
 
 @app.post("/api/auth/login")

@@ -2,7 +2,8 @@
 -- Lookup data: sports; identities: users; inventory: venues and venue_photos;
 -- bookable time: availability_blocks and bookings; payment records: payments;
 -- player activity: matches.
-
+DROP DATABASE khelo;
+CREATE DATABASE khelo;
 CREATE EXTENSION IF NOT EXISTS citext;
 
 CREATE TYPE user_role AS ENUM ('player', 'court_manager');
@@ -41,6 +42,7 @@ CREATE TABLE venues (
     closes_at TIME NOT NULL,
     booking_price_cents INTEGER NOT NULL CHECK (booking_price_cents >= 0),
     currency CHAR(3) NOT NULL DEFAULT 'INR',
+    booking_id BIGINT NOT NULL DEFAULT -1,
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (closes_at > opens_at)
@@ -63,7 +65,7 @@ CREATE TABLE availability_blocks (
 );
 
 CREATE TABLE bookings (
-    id UUID PRIMARY KEY,
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     venue_id UUID NOT NULL REFERENCES venues(id),
     player_id UUID NOT NULL REFERENCES users(id),
     starts_at TIMESTAMPTZ NOT NULL,
@@ -76,7 +78,7 @@ CREATE TABLE bookings (
 
 CREATE TABLE payments (
     id UUID PRIMARY KEY,
-    booking_id UUID NOT NULL UNIQUE REFERENCES bookings(id),
+    booking_id BIGINT NOT NULL UNIQUE REFERENCES bookings(id),
     stripe_payment_intent_id TEXT NOT NULL UNIQUE,
     amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
     status payment_status NOT NULL DEFAULT 'pending',
@@ -89,7 +91,7 @@ CREATE TABLE matches (
     opponent_name TEXT NOT NULL,
     final_score TEXT NOT NULL,
     played_on DATE NOT NULL,
-    booking_id UUID REFERENCES bookings(id) ON DELETE SET NULL
+    booking_id BIGINT REFERENCES bookings(id) ON DELETE SET NULL
 );
 
 CREATE INDEX venues_sport_id_idx ON venues(sport_id);
