@@ -27,6 +27,8 @@ app = FastAPI(title="Khelo API", version="0.1.0")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 VENUE_POLL_INTERVAL_SECONDS = 10
 last_venue_poll: dict[UUID, float] = {}
+RATING_POLL_INTERVAL_SECONDS = 10
+rating_cache: dict[UUID, tuple[float, UUID, dict]] = {}
 
 
 class SignupRequest(BaseModel):
@@ -171,6 +173,61 @@ def login_page() -> FileResponse:
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/venues/{venue_id}/ratings")
+def get_venue_ratings(venue_id: UUID, user_id: UUID) -> dict:
+    """Return venue ratings, reusing the user's previous result during the cooldown."""
+    now = monotonic()
+    cached = rating_cache.get(user_id)
+    if cached and now - cached[0] < RATING_POLL_INTERVAL_SECONDS:
+        return cached[2]
+
+    try:
+        with get_database_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+                if not cursor.fetchone():
+                    raise HTTPException(status_code=404, detail="User not found.")
+
+                cursor.execute(
+                    """
+                    SELECT id, rating_text, rating, user_id, venue_id,
+                           reply_ids, likes, dislikes, created_at
+                    FROM ratings
+                    WHERE venue_id = %s
+                    ORDER BY (likes + cardinality(reply_ids) - dislikes) DESC,
+                             created_at DESC, id DESC
+                    """,
+                    (venue_id,),
+                )
+                ratings = [
+                    {
+                        "rating_id": rating[0],
+                        "rating_text": rating[1],
+                        "rating": rating[2],
+                        "user_id": str(rating[3]),
+                        "venue_id": str(rating[4]),
+                        "reply_ids": rating[5],
+                        "likes": rating[6],
+                        "dislikes": rating[7],
+                        "score": rating[6] + len(rating[5]) - rating[7],
+                        "created_at": rating[8].isoformat(),
+                    }
+                    for rating in cursor.fetchall()
+                ]
+    except HTTPException:
+        raise
+    except (RuntimeError, psycopg.Error) as error:
+        raise HTTPException(status_code=503, detail="Ratings are temporarily unavailable.") from error
+
+    response = {
+        "venue_id": str(venue_id),
+        "next_request_after_seconds": RATING_POLL_INTERVAL_SECONDS,
+        "ratings": ratings,
+    }
+    rating_cache[user_id] = (now, venue_id, response)
+    return response
 
 
 @app.get("/api/venues/discover")

@@ -42,10 +42,23 @@ CREATE TABLE venues (
     closes_at TIME NOT NULL,
     booking_price_cents INTEGER NOT NULL CHECK (booking_price_cents >= 0),
     currency CHAR(3) NOT NULL DEFAULT 'INR',
+    rating_ids BIGINT[] NOT NULL DEFAULT '{}',
     booking_id BIGINT NOT NULL DEFAULT -1,
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (closes_at > opens_at)
+);
+
+CREATE TABLE ratings (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    rating_text TEXT NOT NULL CHECK (char_length(trim(rating_text)) > 0),
+    rating SMALLINT NOT NULL CHECK (rating BETWEEN 0 AND 5),
+    user_id UUID NOT NULL REFERENCES users(id),
+    venue_id UUID NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+    reply_ids BIGINT[] NOT NULL DEFAULT '{}',
+    likes INTEGER NOT NULL DEFAULT 0 CHECK (likes >= 0),
+    dislikes INTEGER NOT NULL DEFAULT 0 CHECK (dislikes >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE venue_photos (
@@ -95,6 +108,11 @@ CREATE TABLE matches (
 );
 
 CREATE INDEX venues_sport_id_idx ON venues(sport_id);
+CREATE INDEX ratings_venue_score_idx ON ratings (
+    venue_id,
+    ((likes + cardinality(reply_ids) - dislikes)) DESC,
+    created_at DESC
+);
 CREATE INDEX bookings_venue_time_idx ON bookings(venue_id, starts_at, ends_at);
 CREATE INDEX availability_blocks_venue_time_idx ON availability_blocks(venue_id, starts_at, ends_at);
 CREATE INDEX matches_player_date_idx ON matches(player_id, played_on DESC);
