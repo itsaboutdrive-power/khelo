@@ -24,6 +24,28 @@
         </form>
         <p id="form-message" class="form-message" role="status"></p>
         <section id="venue-results" class="venue-results" aria-live="polite"><p>Finding available courts near you...</p></section>
+        <section id="venue-detail" class="venue-detail hidden" aria-live="polite">
+          <div class="detail-heading">
+            <div>
+              <p class="form-kicker">SELECTED VENUE</p>
+              <h3 id="selected-venue-name"></h3>
+              <p id="selected-venue-address"></p>
+            </div>
+            <a id="selected-venue-map" target="_blank" rel="noreferrer">Open map</a>
+          </div>
+          <div class="detail-grid">
+            <section>
+              <p class="detail-label">TODAY'S SLOTS</p>
+              <p id="availability-message" class="detail-message"></p>
+              <div id="venue-slots" class="venue-slots"></div>
+            </section>
+            <section>
+              <p class="detail-label">COMMUNITY RATINGS</p>
+              <p id="ratings-message" class="detail-message"></p>
+              <div id="venue-ratings" class="venue-ratings"></div>
+            </section>
+          </div>
+        </section>
       </section>
     </main>
     <script src="/static/app.js"></script>

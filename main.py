@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 import hashlib
 import hmac
 import os
@@ -29,6 +29,7 @@ VENUE_POLL_INTERVAL_SECONDS = 10
 last_venue_poll: dict[UUID, float] = {}
 RATING_POLL_INTERVAL_SECONDS = 10
 rating_cache: dict[UUID, tuple[float, UUID, dict]] = {}
+availability_cache: dict[UUID, tuple[float, UUID, dict]] = {}
 
 
 class SignupRequest(BaseModel):
@@ -80,6 +81,11 @@ class VenueRequest(BaseModel):
     booking_price_cents: int = Field(ge=0)
     currency: str = Field(default="INR", min_length=3, max_length=3)
     photo_urls: list[HttpUrl] = Field(default_factory=list, max_length=10)
+
+
+class ReplyRequest(BaseModel):
+    user_id: UUID
+    reply_text: str = Field(min_length=1, max_length=2000)
 
 
 def hash_password(password: str) -> str:
@@ -175,20 +181,39 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def rating_response(row: tuple) -> dict:
+    return {
+        "rating_id": row[0],
+        "rating_text": row[1],
+        "rating": row[2],
+        "user_id": str(row[3]),
+        "venue_id": str(row[4]),
+        "reply_ids": row[5] or [],
+        "likes": row[6],
+        "dislikes": row[7],
+        "score": row[6] + len(row[5] or []) - row[7],
+        "created_at": row[8].isoformat(),
+    }
+
+
+def require_user(cursor, user_id: UUID) -> None:
+    cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="User not found.")
+
+
 @app.get("/api/venues/{venue_id}/ratings")
 def get_venue_ratings(venue_id: UUID, user_id: UUID) -> dict:
     """Return venue ratings, reusing the user's previous result during the cooldown."""
     now = monotonic()
     cached = rating_cache.get(user_id)
-    if cached and now - cached[0] < RATING_POLL_INTERVAL_SECONDS:
+    if cached and cached[1] == venue_id and now - cached[0] < RATING_POLL_INTERVAL_SECONDS:
         return cached[2]
 
     try:
         with get_database_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
-                if not cursor.fetchone():
-                    raise HTTPException(status_code=404, detail="User not found.")
+                require_user(cursor, user_id)
 
                 cursor.execute(
                     """
@@ -201,21 +226,22 @@ def get_venue_ratings(venue_id: UUID, user_id: UUID) -> dict:
                     """,
                     (venue_id,),
                 )
-                ratings = [
-                    {
-                        "rating_id": rating[0],
-                        "rating_text": rating[1],
-                        "rating": rating[2],
-                        "user_id": str(rating[3]),
-                        "venue_id": str(rating[4]),
-                        "reply_ids": rating[5],
-                        "likes": rating[6],
-                        "dislikes": rating[7],
-                        "score": rating[6] + len(rating[5]) - rating[7],
-                        "created_at": rating[8].isoformat(),
-                    }
-                    for rating in cursor.fetchall()
-                ]
+                all_ratings = [rating_response(rating) for rating in cursor.fetchall()]
+                rating_by_id = {rating["rating_id"]: rating for rating in all_ratings}
+                reply_ids = {
+                    reply_id
+                    for rating in all_ratings
+                    for reply_id in rating["reply_ids"]
+                }
+                ratings = []
+                for rating in all_ratings:
+                    rating["replies"] = [
+                        rating_by_id[reply_id]
+                        for reply_id in rating["reply_ids"]
+                        if reply_id in rating_by_id
+                    ]
+                    if rating["rating_id"] not in reply_ids:
+                        ratings.append(rating)
     except HTTPException:
         raise
     except (RuntimeError, psycopg.Error) as error:
@@ -228,6 +254,133 @@ def get_venue_ratings(venue_id: UUID, user_id: UUID) -> dict:
     }
     rating_cache[user_id] = (now, venue_id, response)
     return response
+
+
+@app.get("/api/venues/{venue_id}/availability")
+def get_venue_availability(venue_id: UUID, user_id: UUID) -> dict:
+    """Return slot availability for the venue, cached per user and venue for 10 seconds."""
+    now = monotonic()
+    cached = availability_cache.get(user_id)
+    if cached and cached[1] == venue_id and now - cached[0] < RATING_POLL_INTERVAL_SECONDS:
+        return cached[2]
+
+    try:
+        with get_database_connection() as connection:
+            with connection.cursor() as cursor:
+                require_user(cursor, user_id)
+                cursor.execute(
+                    "SELECT opens_at, closes_at, slot_duration_minutes FROM venues WHERE id = %s AND is_active = true",
+                    (venue_id,),
+                )
+                venue = cursor.fetchone()
+                if not venue:
+                    raise HTTPException(status_code=404, detail="Venue not found.")
+
+                cursor.execute(
+                    """
+                    SELECT starts_at, ends_at FROM bookings
+                    WHERE venue_id = %s AND status IN ('pending', 'confirmed')
+                      AND ends_at > now()
+                    UNION ALL
+                    SELECT starts_at, ends_at FROM availability_blocks
+                    WHERE venue_id = %s AND ends_at > now()
+                    """,
+                    (venue_id, venue_id),
+                )
+                unavailable_ranges = cursor.fetchall()
+    except HTTPException:
+        raise
+    except (RuntimeError, psycopg.Error) as error:
+        raise HTTPException(status_code=503, detail="Availability is temporarily unavailable.") from error
+
+    opens_at, closes_at, duration = venue
+    today = datetime.now(timezone.utc).date()
+    slot_start = datetime.combine(today, opens_at, tzinfo=timezone.utc)
+    closing = datetime.combine(today, closes_at, tzinfo=timezone.utc)
+    slots = []
+    while slot_start + timedelta(minutes=duration) <= closing:
+        slot_end = slot_start + timedelta(minutes=duration)
+        is_booked = any(start < slot_end and end > slot_start for start, end in unavailable_ranges)
+        slots.append({
+            "starts_at": slot_start.isoformat(),
+            "ends_at": slot_end.isoformat(),
+            "status": "booked" if is_booked else "available",
+        })
+        slot_start = slot_end
+
+    response = {"venue_id": str(venue_id), "date": today.isoformat(), "slots": slots}
+    availability_cache[user_id] = (now, venue_id, response)
+    return response
+
+
+def clear_rating_caches(user_id: UUID, venue_id: UUID) -> None:
+    if rating_cache.get(user_id, (None, None, None))[1] == venue_id:
+        rating_cache.pop(user_id, None)
+    if availability_cache.get(user_id, (None, None, None))[1] == venue_id:
+        availability_cache.pop(user_id, None)
+
+
+@app.post("/api/ratings/{rating_id}/like")
+def like_rating(rating_id: int, user_id: UUID) -> dict:
+    return update_rating_reaction(rating_id, user_id, "likes")
+
+
+@app.post("/api/ratings/{rating_id}/dislike")
+def dislike_rating(rating_id: int, user_id: UUID) -> dict:
+    return update_rating_reaction(rating_id, user_id, "dislikes")
+
+
+def update_rating_reaction(rating_id: int, user_id: UUID, column: Literal["likes", "dislikes"]) -> dict:
+    try:
+        with get_database_connection() as connection:
+            with connection.cursor() as cursor:
+                require_user(cursor, user_id)
+                cursor.execute(
+                    f"UPDATE ratings SET {column} = {column} + 1 WHERE id = %s RETURNING venue_id, likes, dislikes, reply_ids",
+                    (rating_id,),
+                )
+                rating = cursor.fetchone()
+                if not rating:
+                    raise HTTPException(status_code=404, detail="Rating not found.")
+                clear_rating_caches(user_id, rating[0])
+                return {"rating_id": rating_id, "likes": rating[1], "dislikes": rating[2]}
+    except HTTPException:
+        raise
+    except (RuntimeError, psycopg.Error) as error:
+        raise HTTPException(status_code=503, detail="Rating update is temporarily unavailable.") from error
+
+
+@app.post("/api/ratings/{rating_id}/replies", status_code=status.HTTP_201_CREATED)
+def create_rating_reply(rating_id: int, payload: ReplyRequest) -> dict:
+    try:
+        with get_database_connection() as connection:
+            with connection.cursor() as cursor:
+                require_user(cursor, payload.user_id)
+                cursor.execute("SELECT venue_id FROM ratings WHERE id = %s", (rating_id,))
+                parent = cursor.fetchone()
+                if not parent:
+                    raise HTTPException(status_code=404, detail="Rating not found.")
+                cursor.execute(
+                    """
+                    INSERT INTO ratings (rating_text, rating, user_id, venue_id)
+                    VALUES (%s, 0, %s, %s)
+                    RETURNING id, rating_text, rating, user_id, venue_id, reply_ids, likes, dislikes, created_at
+                    """,
+                    (payload.reply_text.strip(), payload.user_id, parent[0]),
+                )
+                reply = cursor.fetchone()
+                if not reply:
+                    raise HTTPException(status_code=500, detail="Reply could not be created.")
+                cursor.execute(
+                    "UPDATE ratings SET reply_ids = array_append(reply_ids, %s) WHERE id = %s",
+                    (reply[0], rating_id),
+                )
+                clear_rating_caches(payload.user_id, parent[0])
+                return rating_response(reply)
+    except HTTPException:
+        raise
+    except (RuntimeError, psycopg.Error) as error:
+        raise HTTPException(status_code=503, detail="Reply creation is temporarily unavailable.") from error
 
 
 @app.get("/api/venues/discover")

@@ -128,7 +128,56 @@ document.getElementById("venue-form")?.addEventListener("submit", async (event) 
 
 const venueResults = document.getElementById("venue-results");
 const filterSports = document.getElementById("sport-filters");
+const venueDetail = document.getElementById("venue-detail");
 let playerLocation;
+let selectedVenue;
+
+const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
+}[character]));
+
+const renderAvailability = (availability) => {
+  const slots = document.getElementById("venue-slots");
+  document.getElementById("availability-message").textContent = `${availability.date} · green is available, black is booked`;
+  slots.innerHTML = availability.slots.length
+    ? availability.slots.map((slot) => `<button class="slot ${slot.status}" type="button" ${slot.status === "booked" ? "disabled" : ""} title="${slot.status === "booked" ? "Booked" : "Available"}">${new Date(slot.starts_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} - ${new Date(slot.ends_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</button>`).join("")
+    : "<p>No slots are available today.</p>";
+};
+
+const renderRatings = (result) => {
+  const ratings = document.getElementById("venue-ratings");
+  document.getElementById("ratings-message").textContent = result.ratings.length ? "Sorted by community activity" : "Be the first to leave a rating.";
+  ratings.innerHTML = result.ratings.map((rating) => `<article class="rating-card">
+    <div class="rating-card-heading"><strong>${"★".repeat(rating.rating)}${"☆".repeat(5 - rating.rating)}</strong><time>${new Date(rating.created_at).toLocaleDateString()}</time></div>
+    <p>${escapeHtml(rating.rating_text)}</p>
+    <div class="rating-actions"><button type="button" data-rating-action="like" data-rating-id="${rating.rating_id}">Like <span>${rating.likes}</span></button><button type="button" data-rating-action="dislike" data-rating-id="${rating.rating_id}">Dislike <span>${rating.dislikes}</span></button><button type="button" data-reply-toggle="${rating.rating_id}">Reply</button></div>
+    <div class="rating-replies">${(rating.replies || []).map((reply) => `<p><strong>Reply:</strong> ${escapeHtml(reply.rating_text)}</p>`).join("")}</div>
+    <form class="reply-form hidden-form" data-reply-form="${rating.rating_id}"><input name="reply_text" maxlength="2000" placeholder="Write a reply" required /><button class="reply-submit" type="submit">Send</button></form>
+  </article>`).join("") || "<p>No ratings yet.</p>";
+};
+
+const loadVenueDetail = async (venue) => {
+  const user = savedUser();
+  selectedVenue = venue;
+  venueDetail.classList.remove("hidden");
+  document.getElementById("selected-venue-name").textContent = venue.name;
+  document.getElementById("selected-venue-address").textContent = venue.address;
+  document.getElementById("selected-venue-map").href = venue.google_maps_url;
+  document.getElementById("venue-slots").innerHTML = "<p>Checking availability...</p>";
+  document.getElementById("venue-ratings").innerHTML = "<p>Loading ratings...</p>";
+  venueDetail.scrollIntoView({ behavior: "smooth", block: "start" });
+  try {
+    const [availability, ratings] = await Promise.all([
+      request(`/api/venues/${venue.venue_id}/availability?user_id=${user.user_id}`, { method: "GET" }),
+      request(`/api/venues/${venue.venue_id}/ratings?user_id=${user.user_id}`, { method: "GET" }),
+    ]);
+    if (selectedVenue.venue_id !== venue.venue_id) return;
+    renderAvailability(availability);
+    renderRatings(ratings);
+  } catch (error) {
+    showMessage(error.message);
+  }
+};
 
 const loadPlayerVenues = async () => {
   const user = savedUser();
@@ -146,11 +195,39 @@ const loadPlayerVenues = async () => {
   try {
     const result = await request(`/api/venues/discover?${parameters}`, { method: "GET" });
     venueResults.innerHTML = result.venues.length
-      ? result.venues.map((venue) => `<article class="venue-result"><div><p class="form-kicker">${venue.sport}</p><h3>${venue.name}</h3><p>${venue.address}</p></div><div class="venue-meta"><strong>${(venue.booking_price_cents / 100).toFixed(0)} ${venue.currency}</strong><span>${(venue.distance_meters / 1000).toFixed(1)} km away</span><a href="${venue.google_maps_url}" target="_blank" rel="noreferrer">Map</a></div></article>`).join("")
+      ? result.venues.map((venue) => `<article class="venue-result" tabindex="0" role="button" data-venue-id="${venue.venue_id}"><div><p class="form-kicker">${venue.sport}</p><h3>${escapeHtml(venue.name)}</h3><p>${escapeHtml(venue.address)}</p></div><div class="venue-meta"><strong>${(venue.booking_price_cents / 100).toFixed(0)} ${venue.currency}</strong><span>${(venue.distance_meters / 1000).toFixed(1)} km away</span><a href="${venue.google_maps_url}" target="_blank" rel="noreferrer">Map</a></div></article>`).join("")
       : "<p>No courts are currently available within 10 km.</p>";
+    venueResults.querySelectorAll("[data-venue-id]").forEach((card) => {
+      const venue = result.venues.find((item) => item.venue_id === card.dataset.venueId);
+      card.addEventListener("click", (event) => { if (event.target.tagName !== "A") loadVenueDetail(venue); });
+      card.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); loadVenueDetail(venue); } });
+    });
     showMessage("", false);
   } catch (error) { showMessage(error.message); }
 };
+
+venueDetail?.addEventListener("click", async (event) => {
+  const actionButton = event.target.closest("[data-rating-action]");
+  const replyToggle = event.target.closest("[data-reply-toggle]");
+  if (replyToggle) document.querySelector(`[data-reply-form="${replyToggle.dataset.replyToggle}"]`).classList.toggle("hidden-form");
+  if (!actionButton || !selectedVenue) return;
+  try {
+    await request(`/api/ratings/${actionButton.dataset.ratingId}/${actionButton.dataset.ratingAction}?user_id=${savedUser().user_id}`, { method: "POST" });
+    const ratings = await request(`/api/venues/${selectedVenue.venue_id}/ratings?user_id=${savedUser().user_id}`, { method: "GET" });
+    renderRatings(ratings);
+  } catch (error) { showMessage(error.message); }
+});
+
+venueDetail?.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-reply-form]");
+  if (!form || !selectedVenue) return;
+  event.preventDefault();
+  try {
+    await request(`/api/ratings/${form.dataset.replyForm}/replies`, { method: "POST", body: JSON.stringify({ user_id: savedUser().user_id, reply_text: form.reply_text.value }) });
+    const ratings = await request(`/api/venues/${selectedVenue.venue_id}/ratings?user_id=${savedUser().user_id}`, { method: "GET" });
+    renderRatings(ratings);
+  } catch (error) { showMessage(error.message); }
+});
 
 if (venueResults) {
   request("/api/sports", { method: "GET" })
